@@ -1,0 +1,8 @@
+{
+  "name": "Tactical AI Radio",
+  "description": "A Zello-style PTT walkie-talkie interface with real-time OpenTopoMap tracking for teams, powered by Gemini Live API for tactical AI coordination.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
