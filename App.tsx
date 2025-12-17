@@ -218,4 +218,20 @@ function App() {
 
       <div className="hidden md:block absolute top-6 left-6 w-72 bg-gray-950/80 backdrop-blur-md rounded-xl border border-white/5 shadow-2xl h-[450px] overflow-hidden z-[500]">
          <div className="p-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-            <span
+            <span className="text-[10px] font-black tracking-widest text-gray-500">SQUAD_ROSTER</span>
+            <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} title={supabase ? "Database Connected" : "Database Disconnected"} />
+         </div>
+         <TeamList members={teamMembers} />
+      </div>
+
+      <EmergencyModal 
+        isOpen={showEmergencyModal} 
+        onClose={() => setShowEmergencyModal(false)}
+        location={userLocation}
+      />
+    </div>
+  );
+}
+
+export default App;
+
