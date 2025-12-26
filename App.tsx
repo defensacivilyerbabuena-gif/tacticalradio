@@ -47,9 +47,9 @@ function App() {
     };
   }, [isTalking]);
 
-  // Filtrar miembros por el canal actual
+  // Filtrar miembros por el canal actual (o mostrar globales si no tienen canal)
   const teamMembers = useMemo(() => {
-    const filtered = teamMembersRaw.filter(m => m.channel_id === currentChannel);
+    const filtered = teamMembersRaw.filter(m => !m.channel_id || m.channel_id === currentChannel);
     if (!userLocation) return filtered;
     return filtered.map(m => ({
       ...m,
@@ -73,12 +73,17 @@ function App() {
   }, [isProfileSet]);
 
   useEffect(() => {
-    if (!isProfileSet || !navigator.geolocation) return;
+    if (!isProfileSet || !navigator.geolocation) {
+      if (!navigator.geolocation) setSystemLog("SIN_SOPORTE_GPS");
+      return;
+    }
+    
+    setSystemLog("BUSCANDO_SATÉLITES...");
     
     const watchId = navigator.geolocation.watchPosition(async (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
-      setSystemLog(`GPS_FIX_${currentChannel} (${accuracy.toFixed(0)}m)`);
+      setSystemLog(`GPS_OK_CH${currentChannel}`);
       
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
@@ -89,8 +94,15 @@ function App() {
         status: isTalking ? 'talking' : 'online', 
         channel_id: currentChannel,
         last_seen: new Date().toISOString()
-      });
-    }, null, { enableHighAccuracy: true });
+      }, { onConflict: 'id' });
+    }, (error) => {
+      console.error("GPS_ERROR:", error);
+      setSystemLog(`GPS_ERROR: ${error.code}`);
+    }, { 
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    });
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [isTalking, isProfileSet, userName, currentChannel]);
@@ -127,7 +139,6 @@ function App() {
     setCurrentChannel(id);
     localStorage.setItem('tactical_channel', id);
     if (connectionState === ConnectionState.CONNECTED) {
-      // Re-conectar automáticamente al cambiar canal si ya estábamos online
       setTimeout(handleConnect, 100);
     }
   };
