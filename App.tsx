@@ -11,6 +11,7 @@ import { User, ShieldCheck } from 'lucide-react';
 
 const DEVICE_ID = getDeviceId();
 
+// Helper to calculate distance between coordinates
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): string {
   const R = 6371; 
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -37,6 +38,26 @@ function App() {
 
   const radioRef = useRef<RadioService | null>(null);
 
+  // Helper to sync user status with the database
+  const syncUserStatus = useCallback(async (overrides = {}) => {
+    if (!isProfileSet || !userLocation) return;
+    
+    const data = {
+      id: DEVICE_ID, 
+      name: userName, 
+      lat: userLocation.lat, 
+      lng: userLocation.lng, 
+      role: `Unidad en Canal ${currentChannel}`, 
+      status: isTalking ? 'talking' : 'online', 
+      channel_id: currentChannel,
+      last_seen: new Date().toISOString(),
+      ...overrides
+    };
+
+    await supabase.from('locations').upsert(data, { onConflict: 'id' });
+  }, [isProfileSet, userLocation, userName, currentChannel, isTalking]);
+
+  // Handle global mouse up to stop transmission
   useEffect(() => {
     const handleGlobalMouseUp = () => { if (isTalking) handleTalkEnd(); };
     window.addEventListener('mouseup', handleGlobalMouseUp);
@@ -47,7 +68,7 @@ function App() {
     };
   }, [isTalking]);
 
-  // MOSTRAR TODOS LOS MIEMBROS (El canal es solo para voz)
+  // Filter team members and calculate distances
   const teamMembers = useMemo(() => {
     if (!userLocation) return teamMembersRaw;
     return teamMembersRaw.map(m => ({
@@ -56,7 +77,7 @@ function App() {
     }));
   }, [teamMembersRaw, userLocation]);
 
-  // Cargar miembros iniciales y suscribirse a cambios globales
+  // Subscribe to real-time location updates
   useEffect(() => {
     if (!isProfileSet) return;
 
@@ -84,6 +105,7 @@ function App() {
     return () => { supabase.removeChannel(channel); };
   }, [isProfileSet]);
 
+  // Track GPS location
   useEffect(() => {
     if (!isProfileSet || !navigator.geolocation) {
       if (!navigator.geolocation) setSystemLog("SIN_SOPORTE_GPS");
@@ -92,13 +114,13 @@ function App() {
     
     setSystemLog("BUSCANDO_GPS...");
     
-    const watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const watchId = navigator.geolocation.watchPosition((pos) => {
       const { latitude, longitude } = pos.coords;
-      setUserLocation({ lat: latitude, lng: longitude });
+      const newLoc = { lat: latitude, lng: longitude };
+      setUserLocation(newLoc);
       setSystemLog(`GPS_OK_ACTIVO`);
       
-      // Actualizar mi posición siempre, indicando mi canal de voz actual
-      await supabase.from('locations').upsert({
+      supabase.from('locations').upsert({
         id: DEVICE_ID, 
         name: userName, 
         lat: latitude, 
@@ -117,10 +139,14 @@ function App() {
     });
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isTalking, isProfileSet, userName, currentChannel]);
+  }, [isProfileSet, userName, currentChannel]);
 
-  const handleConnect = useCallback(() => {
-    if (radioRef.current) radioRef.current.disconnect();
+  useEffect(() => {
+    syncUserStatus();
+  }, [isTalking]);
+
+  const handleConnect = useCallback(async () => {
+    if (radioRef.current) await radioRef.current.disconnect();
     
     setConnectionState(ConnectionState.CONNECTING);
     try {
@@ -141,19 +167,24 @@ function App() {
     }
   }, [userName, currentChannel]);
 
-  const handleDisconnect = useCallback(() => {
-    if (radioRef.current) radioRef.current.disconnect();
+  const handleDisconnect = useCallback(async () => {
+    if (radioRef.current) await radioRef.current.disconnect();
     radioRef.current = null;
     setConnectionState(ConnectionState.DISCONNECTED);
   }, []);
 
   const changeChannel = (id: string) => {
+    if (id === currentChannel) return;
     setCurrentChannel(id);
     localStorage.setItem('tactical_channel', id);
-    if (connectionState === ConnectionState.CONNECTED) {
-      setTimeout(handleConnect, 100);
-    }
+    syncUserStatus({ channel_id: id, role: `Unidad en Canal ${id}` });
   };
+
+  useEffect(() => {
+    if (connectionState === ConnectionState.CONNECTED) {
+      handleConnect();
+    }
+  }, [currentChannel, handleConnect]);
 
   const handleTalkStart = async () => {
     if (radioRef.current && connectionState === ConnectionState.CONNECTED) {
@@ -177,6 +208,7 @@ function App() {
     setIsProfileSet(true);
   };
 
+  // Profile setup screen
   if (!isProfileSet) {
     return (
       <div className="h-[100dvh] w-screen bg-black flex items-center justify-center p-6 font-mono">
@@ -206,43 +238,67 @@ function App() {
     );
   }
 
+  // Main Tactical Interface
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] w-screen bg-black overflow-hidden relative text-white font-sans">
-      <div className="flex-1 relative border-b md:border-b-0 md:border-r border-white/10 overflow-hidden">
-         <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
-         <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2 pointer-events-none">
-            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
-              <span className="text-[9px] text-orange-500/50 block font-mono">ID_UNIDAD</span>
-              <span className="text-xs font-bold text-orange-500 font-mono">{userName}</span>
+    <div className="flex flex-col h-[100dvh] w-screen bg-black overflow-hidden font-mono text-white">
+      {/* Upper area: Map and Team List */}
+      <div className="flex-1 flex flex-col md:flex-row relative min-h-0">
+        {/* Tactical Map */}
+        <div className="flex-1 relative border-b md:border-b-0 md:border-r border-gray-800">
+          <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
+          
+          {/* Status Indicators Overlay */}
+          <div className="absolute top-4 left-4 z-[1000] space-y-2 pointer-events-none">
+            <div className="bg-black/80 border border-white/10 px-3 py-1.5 rounded-sm backdrop-blur-md shadow-2xl">
+              <div className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-0.5">ESTADO_RED</div>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${connectionState === ConnectionState.CONNECTED ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                <span className="text-[11px] font-bold text-gray-200">{connectionState.toUpperCase()}</span>
+              </div>
             </div>
-            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
-              <span className="text-[9px] text-emerald-500/50 block font-mono">VOICE_CH_{currentChannel}</span>
-              <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase">{systemLog}</span>
+            
+            <div className="bg-black/80 border border-white/10 px-3 py-1.5 rounded-sm backdrop-blur-md shadow-2xl">
+              <div className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-0.5">LOG_SISTEMA</div>
+              <div className="text-[11px] font-bold text-orange-500 whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]">{systemLog}</div>
             </div>
-         </div>
-         <div className="hidden md:block absolute bottom-6 left-6 w-64 bg-black/90 backdrop-blur rounded border border-white/10 shadow-2xl h-64 overflow-hidden z-[500]">
-            <div className="p-2 bg-white/5 border-b border-white/10 text-[9px] font-bold text-gray-400 text-center tracking-widest uppercase">Unidades en Malla Global</div>
-            <TeamList members={teamMembers} />
-         </div>
+          </div>
+        </div>
+
+        {/* Sidebar: Active Units */}
+        <div className="h-1/3 md:h-full md:w-80 bg-gray-950 border-t md:border-t-0 md:border-l border-gray-800 flex flex-col">
+          <div className="p-3 border-b border-gray-800 bg-black/40 flex justify-between items-center">
+            <span className="text-[10px] font-black text-gray-400 tracking-widest uppercase">
+              UNIDADES_EN_MALLA
+            </span>
+            <span className="text-[10px] font-mono text-gray-600">{teamMembers.length + 1} ACT</span>
+          </div>
+          <TeamList members={teamMembers} />
+        </div>
       </div>
 
-      <div className="flex-none md:w-[380px] h-auto md:h-full bg-gray-950 z-20">
+      {/* Bottom area: PTT and Radio Controls */}
+      <div className="h-[380px] md:h-[450px] border-t border-gray-800 shadow-2xl relative z-20">
         <RadioControl 
-           connectionState={connectionState}
-           isTalking={isTalking}
-           onTalkStart={handleTalkStart}
-           onTalkEnd={handleTalkEnd}
-           lastTranscript={remoteTalker}
-           onConnect={handleConnect}
-           onDisconnect={handleDisconnect}
-           audioLevel={audioLevel}
-           onEmergencyClick={() => setShowEmergencyModal(true)}
-           currentChannel={currentChannel}
-           onChannelChange={changeChannel}
+          connectionState={connectionState}
+          isTalking={isTalking}
+          onTalkStart={handleTalkStart}
+          onTalkEnd={handleTalkEnd}
+          lastTranscript={remoteTalker ? `RECIBIENDO: ${remoteTalker}` : null}
+          onConnect={handleConnect}
+          onDisconnect={handleDisconnect}
+          onEmergencyClick={() => setShowEmergencyModal(true)}
+          audioLevel={audioLevel}
+          currentChannel={currentChannel}
+          onChannelChange={changeChannel}
         />
       </div>
 
-      <EmergencyModal isOpen={showEmergencyModal} onClose={() => setShowEmergencyModal(false)} location={userLocation} />
+      {/* Emergency SOS Modal */}
+      <EmergencyModal 
+        isOpen={showEmergencyModal} 
+        onClose={() => setShowEmergencyModal(false)} 
+        location={userLocation} 
+      />
     </div>
   );
 }
