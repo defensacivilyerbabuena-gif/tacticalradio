@@ -7,9 +7,9 @@ import { EmergencyModal } from './components/EmergencyModal';
 import { TeamMember, ConnectionState } from './types';
 import { RadioService } from './services/radioService';
 import { supabase, getDeviceId } from './services/supabase';
+import { User, ShieldCheck } from 'lucide-react';
 
 const DEVICE_ID = getDeviceId();
-const USER_NAME = `UNIT-${DEVICE_ID.split('-')[1].toUpperCase()}`;
 
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): string {
   const R = 6371; 
@@ -21,10 +21,13 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 }
 
 function App() {
+  const [userName, setUserName] = useState<string>(localStorage.getItem('user_callsign') || '');
+  const [isProfileSet, setIsProfileSet] = useState<boolean>(!!localStorage.getItem('user_callsign'));
+  const [tempName, setTempName] = useState('');
+  
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [teamMembersRaw, setTeamMembersRaw] = useState<TeamMember[]>([]);
-  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [isTalking, setIsTalking] = useState(false);
   const [remoteTalker, setRemoteTalker] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -33,13 +36,9 @@ function App() {
 
   const radioRef = useRef<RadioService | null>(null);
 
-  // Detener transmisión si se suelta el clic fuera del botón
+  // Detener transmisión globalmente
   useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (isTalking) {
-        handleTalkEnd();
-      }
-    };
+    const handleGlobalMouseUp = () => { if (isTalking) handleTalkEnd(); };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     window.addEventListener('touchend', handleGlobalMouseUp);
     return () => {
@@ -57,6 +56,7 @@ function App() {
   }, [teamMembersRaw, userLocation]);
 
   useEffect(() => {
+    if (!isProfileSet) return;
     const channel = supabase.channel('tactical-realtime')
       .on('postgres_changes', { event: '*', table: 'locations', schema: 'public' }, (payload: any) => {
         if (payload.new && payload.new.id !== DEVICE_ID) {
@@ -68,15 +68,14 @@ function App() {
         }
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [isProfileSet]);
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setSystemLog("SIN_SOPORTE_GPS");
+    if (!isProfileSet || !navigator.geolocation) {
+      if (!navigator.geolocation) setSystemLog("SIN_SOPORTE_GPS");
       return;
     }
     
-    // Configuración de ALTA PRECISIÓN
     const watchId = navigator.geolocation.watchPosition(async (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
@@ -84,7 +83,7 @@ function App() {
       
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
-        name: USER_NAME, 
+        name: userName, 
         lat: latitude, 
         lng: longitude, 
         role: 'Field Op', 
@@ -93,21 +92,17 @@ function App() {
       });
     }, (err) => {
       setSystemLog(`GPS_ERROR: ${err.message}`);
-    }, { 
-      enableHighAccuracy: true, 
-      timeout: 10000, 
-      maximumAge: 0 // Forzar lectura fresca del sensor
-    });
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isTalking]);
+  }, [isTalking, isProfileSet, userName]);
 
   const handleConnect = useCallback(() => {
     setConnectionState(ConnectionState.CONNECTING);
     try {
       radioRef.current = new RadioService({
         userId: DEVICE_ID,
-        userName: USER_NAME,
+        userName: userName,
         onAudioBuffer: () => {
           setAudioLevel(prev => Math.min(100, prev + 25));
           setTimeout(() => setAudioLevel(0), 100);
@@ -121,7 +116,7 @@ function App() {
       setConnectionState(ConnectionState.ERROR);
       setSystemLog("ERROR_CONEXION");
     }
-  }, []);
+  }, [userName]);
 
   const handleDisconnect = useCallback(() => {
     if (radioRef.current) radioRef.current.disconnect();
@@ -144,15 +139,63 @@ function App() {
     }
   };
 
+  const saveProfile = () => {
+    if (tempName.trim().length < 3) return;
+    const finalName = tempName.trim().toUpperCase();
+    localStorage.setItem('user_callsign', finalName);
+    setUserName(finalName);
+    setIsProfileSet(true);
+  };
+
+  if (!isProfileSet) {
+    return (
+      <div className="h-screen w-screen bg-black flex items-center justify-center p-6 font-mono">
+        <div className="w-full max-w-sm space-y-8 bg-gray-950 border border-orange-500/20 p-8 rounded shadow-2xl">
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto border border-orange-500/30">
+              <User className="text-orange-500" size={32} />
+            </div>
+            <h1 className="text-orange-500 font-black tracking-widest text-xl">INGRESAR UNIDAD</h1>
+            <p className="text-[10px] text-gray-500">CONFIGURACIÓN DE IDENTIDAD TÁCTICA</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400 uppercase tracking-widest">Callsign / Nombre</label>
+              <input 
+                autoFocus
+                type="text" 
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                placeholder="EJ: ALFA-1"
+                className="w-full bg-black border border-gray-800 p-4 text-orange-500 focus:border-orange-500 outline-none transition-all font-bold tracking-widest"
+              />
+            </div>
+            <button 
+              onClick={saveProfile}
+              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-orange-900/20"
+            >
+              <ShieldCheck size={20} />
+              CONFIRMAR REGISTRO
+            </button>
+          </div>
+          
+          <p className="text-[9px] text-center text-gray-700">RED MESH TUCUMÁN - ENCRIPTADO AES-256</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen bg-black overflow-hidden relative text-white font-sans">
       <div className="flex flex-col w-full h-full md:flex-row">
-        <div className={`flex-1 relative ${viewMode === 'map' ? 'block' : 'hidden md:block'}`}>
+        <div className="flex-1 relative order-1 md:order-1">
            <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
-           <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
+           <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2 pointer-events-none">
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
                 <span className="text-[10px] text-orange-500/50 block font-mono tracking-widest">MESH_TUCUMAN</span>
-                <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">{USER_NAME}</span>
+                <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">{userName}</span>
               </div>
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
                 <span className="text-[10px] text-emerald-500/50 block font-mono">RADIO_NET</span>
@@ -161,15 +204,13 @@ function App() {
            </div>
         </div>
 
-        <div className={`h-[55vh] md:h-full md:w-[450px] z-20 ${viewMode === 'list' ? 'hidden' : 'block'}`}>
+        <div className="h-[50vh] md:h-full md:w-[450px] z-20 order-2 md:order-2 border-t md:border-t-0 md:border-l border-white/10">
           <RadioControl 
              connectionState={connectionState}
              isTalking={isTalking}
              onTalkStart={handleTalkStart}
              onTalkEnd={handleTalkEnd}
              lastTranscript={remoteTalker ? `${remoteTalker} TRANSMITIENDO...` : null}
-             toggleView={() => setViewMode(prev => prev === 'map' ? 'list' : 'map')}
-             viewMode={viewMode}
              onConnect={handleConnect}
              onDisconnect={handleDisconnect}
              audioLevel={audioLevel}
@@ -180,7 +221,7 @@ function App() {
 
       <div className="hidden md:block absolute bottom-10 left-6 w-72 bg-gray-950/90 backdrop-blur rounded border border-white/5 shadow-2xl h-[300px] overflow-hidden z-[500]">
          <div className="p-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[10px] font-black tracking-widest text-gray-400">RED_UNIDADES</span>
+            <span className="text-[10px] font-black tracking-widest text-gray-400 uppercase">UNIDADES_ACTIVAS</span>
             <div className={`w-2 h-2 rounded-full ${userLocation ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
          </div>
          <TeamList members={teamMembers} />
