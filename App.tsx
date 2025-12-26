@@ -25,34 +25,16 @@ function App() {
   const [isProfileSet, setIsProfileSet] = useState<boolean>(!!localStorage.getItem('user_callsign'));
   const [tempName, setTempName] = useState('');
   
-  const [currentChannel, setCurrentChannel] = useState<string>(localStorage.getItem('tactical_channel') || '1');
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [teamMembersRaw, setTeamMembersRaw] = useState<TeamMember[]>([]);
   const [isTalking, setIsTalking] = useState(false);
   const [remoteTalker, setRemoteTalker] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [systemLog, setSystemLog] = useState<string>("INICIALIZANDO...");
+  const [systemLog, setSystemLog] = useState<string>("BUSCANDO_GPS...");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   const radioRef = useRef<RadioService | null>(null);
-
-  // Sincronización manual para cambios inmediatos (como cambio de canal)
-  const syncNow = useCallback(async (overrides = {}) => {
-    if (!isProfileSet) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    await supabase.from('locations').upsert({
-      id: DEVICE_ID,
-      name: userName,
-      lat: userLocation?.lat || 0,
-      lng: userLocation?.lng || 0,
-      channel_id: currentChannel,
-      status: isTalking ? 'talking' : 'online',
-      last_seen: new Date().toISOString(),
-      ...overrides
-    });
-  }, [isProfileSet, userName, userLocation, currentChannel, isTalking]);
 
   useEffect(() => {
     const handleGlobalMouseUp = () => { if (isTalking) handleTalkEnd(); };
@@ -74,95 +56,78 @@ function App() {
 
   useEffect(() => {
     if (!isProfileSet) return;
-
-    const fetchInitial = async () => {
-      const { data } = await supabase.from('locations').select('*');
-      if (data) setTeamMembersRaw(data.filter(m => m.id !== DEVICE_ID));
-    };
-    fetchInitial();
-
-    const channel = supabase.channel('tactical-global-sync')
+    const channel = supabase.channel('tactical-realtime')
       .on('postgres_changes', { event: '*', table: 'locations', schema: 'public' }, (payload: any) => {
         if (payload.new && payload.new.id !== DEVICE_ID) {
           setTeamMembersRaw(prev => {
             const index = prev.findIndex(m => m.id === payload.new.id);
             if (index === -1) return [...prev, payload.new];
-            const next = [...prev]; 
-            next[index] = payload.new; 
-            return next;
+            const next = [...prev]; next[index] = payload.new; return next;
           });
         }
       }).subscribe();
-      
     return () => { supabase.removeChannel(channel); };
   }, [isProfileSet]);
 
   useEffect(() => {
-    if (!isProfileSet || !navigator.geolocation) return;
-    
-    const watchId = navigator.geolocation.watchPosition((pos) => {
-      const { latitude, longitude } = pos.coords;
-      setUserLocation({ lat: latitude, lng: longitude });
-      setSystemLog("GPS_OK");
-      syncNow({ lat: latitude, lng: longitude });
-    }, (err) => setSystemLog("ERR_GPS"), { enableHighAccuracy: true });
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [isProfileSet, syncNow]);
-
-  const handleConnect = useCallback(async () => {
-    if (radioRef.current) {
-        await radioRef.current.disconnect();
+    if (!isProfileSet || !navigator.geolocation) {
+      if (!navigator.geolocation) setSystemLog("SIN_SOPORTE_GPS");
+      return;
     }
     
+    const watchId = navigator.geolocation.watchPosition(async (pos) => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      setUserLocation({ lat: latitude, lng: longitude });
+      setSystemLog(`GPS_FIX (${accuracy.toFixed(0)}m)`);
+      
+      await supabase.from('locations').upsert({
+        id: DEVICE_ID, 
+        name: userName, 
+        lat: latitude, 
+        lng: longitude, 
+        role: 'Unidad Móvil', 
+        status: isTalking ? 'talking' : 'online', 
+        last_seen: new Date().toISOString()
+      });
+    }, (err) => {
+      setSystemLog(`ERROR_GPS: ${err.message}`);
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isTalking, isProfileSet, userName]);
+
+  const handleConnect = useCallback(() => {
     setConnectionState(ConnectionState.CONNECTING);
     try {
       radioRef.current = new RadioService({
         userId: DEVICE_ID,
         userName: userName,
-        channelId: currentChannel,
         onAudioBuffer: () => {
-          setAudioLevel(prev => Math.min(100, prev + 30));
-          setTimeout(() => setAudioLevel(0), 150);
+          setAudioLevel(prev => Math.min(100, prev + 25));
+          setTimeout(() => setAudioLevel(0), 100);
         },
         onIncomingStreamStart: (name) => setRemoteTalker(name),
         onIncomingStreamEnd: () => setRemoteTalker(null)
       });
       setConnectionState(ConnectionState.CONNECTED);
-      setSystemLog(`CONECTADO_CH${currentChannel}`);
+      setSystemLog("LINK_ACTIVO");
     } catch (e) {
       setConnectionState(ConnectionState.ERROR);
-      setSystemLog("ERROR_RADIO");
+      setSystemLog("LINK_ERROR");
     }
-  }, [userName, currentChannel]);
+  }, [userName]);
 
-  const handleDisconnect = useCallback(async () => {
-    if (radioRef.current) await radioRef.current.disconnect();
+  const handleDisconnect = useCallback(() => {
+    if (radioRef.current) radioRef.current.disconnect();
     radioRef.current = null;
     setConnectionState(ConnectionState.DISCONNECTED);
     setSystemLog("RADIO_OFF");
   }, []);
 
-  const changeChannel = (id: string) => {
-    if (id === currentChannel) return;
-    setCurrentChannel(id);
-    localStorage.setItem('tactical_channel', id);
-    // Forzamos actualización visual inmediata para otros usuarios
-    syncNow({ channel_id: id });
-  };
-
-  // Efecto para reconectar el audio automáticamente al cambiar el canal si la radio estaba encendida
-  useEffect(() => {
-    if (connectionState === ConnectionState.CONNECTED) {
-      handleConnect();
-    }
-  }, [currentChannel]);
-
-  const handleTalkStart = () => {
+  const handleTalkStart = async () => {
     if (radioRef.current && connectionState === ConnectionState.CONNECTED) {
       setIsTalking(true);
       radioRef.current.startTransmission();
-      syncNow({ status: 'talking' });
     }
   };
 
@@ -170,7 +135,6 @@ function App() {
     if (radioRef.current) {
       radioRef.current.stopTransmission();
       setIsTalking(false);
-      syncNow({ status: 'online' });
     }
   };
 
@@ -190,20 +154,20 @@ function App() {
             <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto border border-orange-500/30">
               <User className="text-orange-500" size={32} />
             </div>
-            <h1 className="text-orange-500 font-black tracking-widest text-xl uppercase">Radio Táctica</h1>
+            <h1 className="text-orange-500 font-black tracking-widest text-xl">REGISTRO UNIDAD</h1>
           </div>
-          <div className="space-y-4 text-center">
+          <div className="space-y-4">
             <input 
               autoFocus
               type="text" 
               value={tempName}
               onChange={(e) => setTempName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
-              placeholder="IDENTIFICATIVO"
-              className="w-full bg-black border border-gray-800 p-4 text-orange-500 focus:border-orange-500 outline-none font-bold tracking-widest text-center uppercase"
+              placeholder="CALLSIGN (EJ: MOVIL-1)"
+              className="w-full bg-black border border-gray-800 p-4 text-orange-500 focus:border-orange-500 outline-none transition-all font-bold tracking-widest text-center"
             />
-            <button onClick={saveProfile} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-4 flex items-center justify-center gap-2 transition-colors">
-              <ShieldCheck size={20} /> ENTRAR A MALLA
+            <button onClick={saveProfile} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-4 transition-colors flex items-center justify-center gap-2">
+              <ShieldCheck size={20} /> INICIAR SERVICIO
             </button>
           </div>
         </div>
@@ -212,43 +176,43 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen bg-black overflow-hidden font-mono text-white">
-      <div className="flex-1 flex flex-col md:flex-row relative min-h-0">
-        <div className="flex-1 relative border-b md:border-b-0 md:border-r border-gray-800">
-          <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
-          <div className="absolute top-4 left-4 z-[1000] space-y-2 pointer-events-none">
-            <div className="bg-black/80 border border-white/10 px-3 py-1.5 rounded-sm backdrop-blur-md shadow-2xl">
-              <div className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-0.5">NET_FREQ</div>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${connectionState === ConnectionState.CONNECTED ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-                <span className="text-[11px] font-bold text-gray-200">CH{currentChannel} - {connectionState.toUpperCase()}</span>
-              </div>
+    <div className="flex flex-col md:flex-row h-[100dvh] w-screen bg-black overflow-hidden relative text-white font-sans">
+      
+      {/* SECCIÓN MAPA */}
+      <div className="flex-1 relative border-b md:border-b-0 md:border-r border-white/10 overflow-hidden">
+         <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
+         
+         {/* OVERLAY TÁCTICO */}
+         <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2 pointer-events-none">
+            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
+              <span className="text-[9px] text-orange-500/50 block font-mono tracking-widest">ID_CALLSIGN</span>
+              <span className="text-xs font-bold text-orange-500 font-mono">{userName}</span>
             </div>
-          </div>
-        </div>
+            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
+              <span className="text-[9px] text-emerald-500/50 block font-mono">STATUS_LOG</span>
+              <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase">{systemLog}</span>
+            </div>
+         </div>
 
-        <div className="h-1/3 md:h-full md:w-80 bg-gray-950 border-t md:border-t-0 md:border-l border-gray-800 flex flex-col">
-          <div className="p-3 border-b border-gray-800 bg-black/40 flex justify-between items-center">
-            <span className="text-[10px] font-black text-gray-400 tracking-widest uppercase">UNIDADES_ACTIVAS</span>
-            <span className="text-[10px] font-mono text-gray-600">{teamMembers.length + 1}</span>
-          </div>
-          <TeamList members={teamMembers} />
-        </div>
+         {/* LISTA DE EQUIPO (ESCRITORIO) */}
+         <div className="hidden md:block absolute bottom-6 left-6 w-64 bg-black/90 backdrop-blur rounded border border-white/10 shadow-2xl h-64 overflow-hidden z-[500]">
+            <div className="p-2 bg-white/5 border-b border-white/10 text-[10px] font-bold text-gray-400 text-center tracking-widest">PERSONAL EN LÍNEA</div>
+            <TeamList members={teamMembers} />
+         </div>
       </div>
 
-      <div className="h-[350px] md:h-[400px] border-t border-gray-800 shadow-2xl relative z-20">
+      {/* SECCIÓN RADIO (DERECHA EN PC, ABAJO EN MÓVIL) */}
+      <div className="flex-none md:w-[400px] h-auto md:h-full bg-gray-950 z-20">
         <RadioControl 
-          connectionState={connectionState}
-          isTalking={isTalking}
-          onTalkStart={handleTalkStart}
-          onTalkEnd={handleTalkEnd}
-          lastTranscript={remoteTalker}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-          onEmergencyClick={() => setShowEmergencyModal(true)}
-          audioLevel={audioLevel}
-          currentChannel={currentChannel}
-          onChannelChange={changeChannel}
+           connectionState={connectionState}
+           isTalking={isTalking}
+           onTalkStart={handleTalkStart}
+           onTalkEnd={handleTalkEnd}
+           lastTranscript={remoteTalker ? `${remoteTalker}` : null}
+           onConnect={handleConnect}
+           onDisconnect={handleDisconnect}
+           audioLevel={audioLevel}
+           onEmergencyClick={() => setShowEmergencyModal(true)}
         />
       </div>
 
