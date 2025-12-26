@@ -23,17 +23,10 @@ export class GeminiLiveService {
 
   public async connect(options: LiveServiceOptions) {
     try {
-      options.onLog("CHECKING_AUTH...");
-      
-      // Verificación de API Key según lineamientos de Google
-      if (!(await (window as any).aistudio.hasSelectedApiKey())) {
-        options.onLog("API_KEY_REQUIRED");
-        await (window as any).aistudio.openSelectKey();
-      }
-
       options.onConnectionUpdate(ConnectionState.CONNECTING);
-      options.onLog("INITIALIZING_RADIO_LINK...");
+      options.onLog("INICIANDO_ENLACE...");
 
+      // Uso de la clave de entorno directa (Capa Gratuita)
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -41,7 +34,7 @@ export class GeminiLiveService {
       this.outputNode = this.outputAudioContext.createGain();
       this.outputNode.connect(this.outputAudioContext.destination);
 
-      options.onLog("REQUESTING_MIC_ACCESS...");
+      options.onLog("SOLICITANDO_MIC...");
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       this.sessionPromise = ai.live.connect({
@@ -51,13 +44,13 @@ export class GeminiLiveService {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          systemInstruction: 'Eres Overlord, despachador táctico real. Mantén respuestas breves, estilo militar y profesional. Usa español siempre.',
+          systemInstruction: 'Eres Overlord, un despachador de radio táctico en Tucumán. Responde de forma muy breve y profesional, estilo militar. Usa español argentino.',
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
         callbacks: {
           onopen: () => {
-            options.onLog("LINK_ESTABLISHED_SECURE");
+            options.onLog("RADIO_EN_LINEA");
             options.onConnectionUpdate(ConnectionState.CONNECTED);
             this.startAudioStreaming();
           },
@@ -81,18 +74,17 @@ export class GeminiLiveService {
             }
           },
           onclose: () => {
-            options.onLog("LINK_TERMINATED");
+            options.onLog("ENLACE_CERRADO");
             options.onConnectionUpdate(ConnectionState.DISCONNECTED);
           },
           onerror: (err) => {
-            console.error(err);
-            options.onLog(`ERROR: ${err.message || 'COMM_FAILURE'}`);
+            options.onLog("ERROR_RED");
             options.onConnectionUpdate(ConnectionState.ERROR);
           }
         }
       });
     } catch (error: any) {
-      options.onLog(`CRITICAL: ${error.message}`);
+      options.onLog(`FALLO: ${error.message}`);
       options.onConnectionUpdate(ConnectionState.ERROR);
     }
   }
