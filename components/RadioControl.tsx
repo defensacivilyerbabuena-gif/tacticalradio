@@ -52,7 +52,10 @@ export const RadioControl: React.FC<RadioControlProps> = ({
 
         <div className="flex-1 flex flex-col items-center justify-center z-10 gap-8">
             <div className="w-full bg-black/80 border border-white/10 p-4 rounded font-mono shadow-inner min-h-[100px] flex flex-col justify-center">
-                <div className="flex justify-between text-[9px] text-orange-500/50 mb-2"><span>FREQ: 462.5625 MHz</span><span>SIMPLEX_MODE</span></div>
+                <div className="flex justify-between text-[9px] text-orange-500/50 mb-2">
+                  <span className="uppercase tracking-widest">Digital Tactical Link</span>
+                  <span>SIMPLEX_MODE</span>
+                </div>
                 {connectionState === ConnectionState.CONNECTING && <div className="text-orange-400 text-center animate-pulse text-xs">SINCRO_FREQ...</div>}
                 {isConnected && !isTalking && !lastTranscript && <div className="text-emerald-500 text-center text-sm font-bold tracking-widest uppercase">ESPERANDO_TRAFICO</div>}
                 {isTalking && <div className="text-orange-500 text-center font-black text-lg animate-pulse uppercase">TRANSMITIENDO</div>}
