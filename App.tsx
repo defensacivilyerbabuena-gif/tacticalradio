@@ -31,7 +31,7 @@ function App() {
   const [isTalking, setIsTalking] = useState(false);
   const [remoteTalker, setRemoteTalker] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [systemLog, setSystemLog] = useState<string>("ESPERANDO_GPS...");
+  const [systemLog, setSystemLog] = useState<string>("BUSCANDO_GPS...");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   const radioRef = useRef<RadioService | null>(null);
@@ -78,19 +78,19 @@ function App() {
     const watchId = navigator.geolocation.watchPosition(async (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
-      setSystemLog(`GPS_OK (${accuracy.toFixed(0)}m)`);
+      setSystemLog(`GPS_FIX (${accuracy.toFixed(0)}m)`);
       
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
         name: userName, 
         lat: latitude, 
         lng: longitude, 
-        role: 'Field Op', 
+        role: 'Unidad Móvil', 
         status: isTalking ? 'talking' : 'online', 
         last_seen: new Date().toISOString()
       });
     }, (err) => {
-      setSystemLog(`GPS_ERROR: ${err.message}`);
+      setSystemLog(`ERROR_GPS: ${err.message}`);
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -110,10 +110,10 @@ function App() {
         onIncomingStreamEnd: () => setRemoteTalker(null)
       });
       setConnectionState(ConnectionState.CONNECTED);
-      setSystemLog("MESH_NET_ACTIVE");
+      setSystemLog("LINK_ACTIVO");
     } catch (e) {
       setConnectionState(ConnectionState.ERROR);
-      setSystemLog("ERROR_CONEXION");
+      setSystemLog("LINK_ERROR");
     }
   }, [userName]);
 
@@ -149,76 +149,71 @@ function App() {
   if (!isProfileSet) {
     return (
       <div className="h-[100dvh] w-screen bg-black flex items-center justify-center p-6 font-mono">
-        <div className="w-full max-w-sm space-y-8 bg-gray-950 border border-orange-500/20 p-8 rounded shadow-2xl">
+        <div className="w-full max-w-sm space-y-6 bg-gray-950 border border-orange-500/20 p-8 rounded shadow-2xl">
           <div className="text-center space-y-2">
             <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto border border-orange-500/30">
               <User className="text-orange-500" size={32} />
             </div>
-            <h1 className="text-orange-500 font-black tracking-widest text-xl">INGRESAR UNIDAD</h1>
-            <p className="text-[10px] text-gray-500">CONFIGURACIÓN DE IDENTIDAD TÁCTICA</p>
+            <h1 className="text-orange-500 font-black tracking-widest text-xl">REGISTRO UNIDAD</h1>
           </div>
           <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-[10px] text-gray-400 uppercase tracking-widest">Callsign / Nombre</label>
-              <input 
-                autoFocus
-                type="text" 
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
-                placeholder="EJ: ALFA-1"
-                className="w-full bg-black border border-gray-800 p-4 text-orange-500 focus:border-orange-500 outline-none transition-all font-bold tracking-widest"
-              />
-            </div>
-            <button onClick={saveProfile} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-orange-900/20">
-              <ShieldCheck size={20} />
-              CONFIRMAR REGISTRO
+            <input 
+              autoFocus
+              type="text" 
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+              placeholder="CALLSIGN (EJ: MOVIL-1)"
+              className="w-full bg-black border border-gray-800 p-4 text-orange-500 focus:border-orange-500 outline-none transition-all font-bold tracking-widest text-center"
+            />
+            <button onClick={saveProfile} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black py-4 transition-colors flex items-center justify-center gap-2">
+              <ShieldCheck size={20} /> INICIAR SERVICIO
             </button>
           </div>
-          <p className="text-[9px] text-center text-gray-700 uppercase tracking-widest font-bold">Safe Link Tucumán</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen bg-black overflow-hidden relative text-white font-sans">
-      {/* MAPA: Toma el espacio disponible arriba */}
-      <div className="flex-grow relative border-b border-white/5">
+    <div className="flex flex-col md:flex-row h-[100dvh] w-screen bg-black overflow-hidden relative text-white font-sans">
+      
+      {/* SECCIÓN MAPA */}
+      <div className="flex-1 relative border-b md:border-b-0 md:border-r border-white/10 overflow-hidden">
          <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
+         
+         {/* OVERLAY TÁCTICO */}
          <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2 pointer-events-none">
-            <div className="bg-black/90 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
-              <span className="text-[10px] text-orange-500/50 block font-mono tracking-widest">MESH_TUCUMAN</span>
-              <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">{userName}</span>
+            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
+              <span className="text-[9px] text-orange-500/50 block font-mono tracking-widest">ID_CALLSIGN</span>
+              <span className="text-xs font-bold text-orange-500 font-mono">{userName}</span>
             </div>
-            <div className="bg-black/90 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
-              <span className="text-[10px] text-emerald-500/50 block font-mono">RADIO_NET</span>
-              <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase animate-pulse">{systemLog}</span>
+            <div className="bg-black/80 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
+              <span className="text-[9px] text-emerald-500/50 block font-mono">STATUS_LOG</span>
+              <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase">{systemLog}</span>
             </div>
+         </div>
+
+         {/* LISTA DE EQUIPO (ESCRITORIO) */}
+         <div className="hidden md:block absolute bottom-6 left-6 w-64 bg-black/90 backdrop-blur rounded border border-white/10 shadow-2xl h-64 overflow-hidden z-[500]">
+            <div className="p-2 bg-white/5 border-b border-white/10 text-[10px] font-bold text-gray-400 text-center tracking-widest">PERSONAL EN LÍNEA</div>
+            <TeamList members={teamMembers} />
          </div>
       </div>
 
-      {/* RADIO: Altura fija mínima para controles */}
-      <div className="h-[45%] md:h-full md:w-[450px] md:fixed md:right-0 md:top-0 z-20 border-t md:border-t-0 md:border-l border-white/10 shrink-0">
+      {/* SECCIÓN RADIO (DERECHA EN PC, ABAJO EN MÓVIL) */}
+      <div className="flex-none md:w-[400px] h-auto md:h-full bg-gray-950 z-20">
         <RadioControl 
            connectionState={connectionState}
            isTalking={isTalking}
            onTalkStart={handleTalkStart}
            onTalkEnd={handleTalkEnd}
-           lastTranscript={remoteTalker ? `${remoteTalker} TRANSMITIENDO...` : null}
+           lastTranscript={remoteTalker ? `${remoteTalker}` : null}
            onConnect={handleConnect}
            onDisconnect={handleDisconnect}
            audioLevel={audioLevel}
            onEmergencyClick={() => setShowEmergencyModal(true)}
         />
-      </div>
-
-      <div className="hidden md:block absolute bottom-10 left-6 w-72 bg-gray-950/90 backdrop-blur rounded border border-white/5 shadow-2xl h-[300px] overflow-hidden z-[500]">
-         <div className="p-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[10px] font-black tracking-widest text-gray-400 uppercase">UNIDADES_ACTIVAS</span>
-            <div className={`w-2 h-2 rounded-full ${userLocation ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-         </div>
-         <TeamList members={teamMembers} />
       </div>
 
       <EmergencyModal isOpen={showEmergencyModal} onClose={() => setShowEmergencyModal(false)} location={userLocation} />
