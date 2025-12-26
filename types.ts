@@ -1,3 +1,4 @@
+
 export interface TeamMember {
   id: string;
   name: string;
@@ -5,6 +6,7 @@ export interface TeamMember {
   status: 'online' | 'offline' | 'busy' | 'talking';
   lat: number;
   lng: number;
+  channel_id?: string;
   distance?: string;
 }
 
