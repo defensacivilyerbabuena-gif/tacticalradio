@@ -22,7 +22,11 @@ export class RadioService {
   private options: RadioOptions;
   private isTransmitting: boolean = false;
   private sampleRate: number = 24000;
-  private noiseThreshold: number = 0.015; // Puerta de ruido (Squelch)
+  
+  // Umbrales de ruido mejorados
+  private noiseThreshold: number = 0.025; // Subido para filtrar ventiladores
+  private holdTime: number = 250; // Milisegundos para mantener abierto tras silencio (Histéresis)
+  private lastActiveTime: number = 0;
 
   constructor(options: RadioOptions) {
     this.options = options;
@@ -71,19 +75,23 @@ export class RadioService {
         if (!this.isTransmitting) return;
 
         const inputData = e.inputBuffer.getChannelData(0);
-        
-        // NOISE GATE: Analizar si hay suficiente volumen para transmitir
         let maxVal = 0;
         for (let i = 0; i < inputData.length; i++) {
           const abs = Math.abs(inputData[i]);
           if (abs > maxVal) maxVal = abs;
         }
 
-        // Si es silencio o ruido de fondo muy bajo, no enviamos paquetes
-        if (maxVal < this.noiseThreshold) return;
+        const now = Date.now();
+        if (maxVal >= this.noiseThreshold) {
+          this.lastActiveTime = now;
+        }
+
+        // Si el volumen es bajo Y ha pasado el tiempo de gracia, no transmitimos
+        if (maxVal < this.noiseThreshold && (now - this.lastActiveTime) > this.holdTime) {
+          return;
+        }
 
         const pcm = createPcmBlob(inputData);
-        
         this.channel.send({
           type: 'broadcast',
           event: 'audio-packet',
@@ -123,7 +131,6 @@ export class RadioService {
       
       source.start(this.nextStartTime);
       this.nextStartTime += buffer.duration;
-      
       this.options.onAudioBuffer(buffer, payload.senderName);
 
       source.onended = () => {
@@ -138,6 +145,7 @@ export class RadioService {
 
   public startTransmission() {
     this.isTransmitting = true;
+    this.lastActiveTime = Date.now();
   }
 
   public stopTransmission() {
