@@ -23,10 +23,20 @@ export class GeminiLiveService {
 
   public async connect(options: LiveServiceOptions) {
     try {
-      options.onConnectionUpdate(ConnectionState.CONNECTING);
-      options.onLog("INICIANDO_ENLACE...");
+      options.onLog("VERIFICANDO_LLAVE...");
 
-      // Uso de la clave de entorno directa (Capa Gratuita)
+      // Verificar si hay una API Key seleccionada en el entorno
+      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+      if (!hasKey) {
+        options.onLog("POR FAVOR, SELECCIONA TU LLAVE GRATUITA");
+        await (window as any).aistudio.openSelectKey();
+        // Nota: Después de openSelectKey, process.env.API_KEY se inyecta automáticamente.
+      }
+
+      options.onConnectionUpdate(ConnectionState.CONNECTING);
+      options.onLog("CONECTANDO_CON_GOOGLE...");
+
+      // Crear instancia con la clave inyectada (puede ser de capa gratuita)
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -34,7 +44,7 @@ export class GeminiLiveService {
       this.outputNode = this.outputAudioContext.createGain();
       this.outputNode.connect(this.outputAudioContext.destination);
 
-      options.onLog("SOLICITANDO_MIC...");
+      options.onLog("ABRIENDO_MICROFONO...");
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       this.sessionPromise = ai.live.connect({
@@ -44,13 +54,13 @@ export class GeminiLiveService {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          systemInstruction: 'Eres Overlord, un despachador de radio táctico en Tucumán. Responde de forma muy breve y profesional, estilo militar. Usa español argentino.',
+          systemInstruction: 'Eres Overlord, un despachador de radio real en Tucumán. Responde de forma muy breve y profesional. Usa español de Argentina. Tu objetivo es coordinar unidades en el mapa.',
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
         callbacks: {
           onopen: () => {
-            options.onLog("RADIO_EN_LINEA");
+            options.onLog("CONEXION_EXITOSA");
             options.onConnectionUpdate(ConnectionState.CONNECTED);
             this.startAudioStreaming();
           },
@@ -74,17 +84,19 @@ export class GeminiLiveService {
             }
           },
           onclose: () => {
-            options.onLog("ENLACE_CERRADO");
+            options.onLog("RADIO_DESCONECTADA");
             options.onConnectionUpdate(ConnectionState.DISCONNECTED);
           },
           onerror: (err) => {
-            options.onLog("ERROR_RED");
+            console.error(err);
+            options.onLog("FALLO_EN_EL_ENLACE");
             options.onConnectionUpdate(ConnectionState.ERROR);
           }
         }
       });
     } catch (error: any) {
-      options.onLog(`FALLO: ${error.message}`);
+      console.error(error);
+      options.onLog(`ERROR: ${error.message}`);
       options.onConnectionUpdate(ConnectionState.ERROR);
     }
   }
