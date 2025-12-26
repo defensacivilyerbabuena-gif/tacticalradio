@@ -9,11 +9,13 @@ import { GeminiLiveService } from './services/geminiLive';
 import { supabase, getDeviceId } from './services/supabase';
 
 const DEVICE_ID = getDeviceId();
-const USER_NAME = `UNIT-${DEVICE_ID.split('-')[1].toUpperCase()}`;
+const USER_NAME = `UNIDAD-${DEVICE_ID.split('-')[1].toUpperCase()}`;
 
-// Función para calcular distancia en km
+// Tucumán fallback coords
+const TUCUMAN_DEFAULT = { lat: -26.8241, lng: -65.2226 };
+
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): string {
-  const R = 6371; // Radio de la Tierra en km
+  const R = 6371; 
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = 
@@ -39,16 +41,14 @@ function App() {
 
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
 
-  // Procesar miembros del equipo con distancias calculadas
   const teamMembers = useMemo(() => {
-    if (!userLocation) return teamMembersRaw;
+    const origin = userLocation || TUCUMAN_DEFAULT;
     return teamMembersRaw.map(m => ({
       ...m,
-      distance: calculateDistance(userLocation.lat, userLocation.lng, m.lat, m.lng)
+      distance: calculateDistance(origin.lat, origin.lng, m.lat, m.lng)
     }));
   }, [teamMembersRaw, userLocation]);
 
-  // 1. ESCUCHAR CAMBIOS (Realtime Supabase)
   useEffect(() => {
     if (!supabase) return;
 
@@ -61,7 +61,7 @@ function App() {
         
         if (data) setTeamMembersRaw(data as TeamMember[]);
       } catch (e) {
-        console.error("Failed to fetch locations:", e);
+        console.error("Supabase load error:", e);
       }
     };
 
@@ -96,7 +96,6 @@ function App() {
     };
   }, []);
 
-  // 2. RASTREO GPS REAL
   useEffect(() => {
     if (!navigator.geolocation) return;
 
@@ -113,17 +112,17 @@ function App() {
               name: USER_NAME,
               lat: latitude,
               lng: longitude,
-              role: 'Field Operator',
+              role: 'Rescatista',
               status: 'online',
               last_seen: new Date().toISOString()
             });
           } catch (e) {
-            console.error("Failed to update location in DB:", e);
+            console.error("DB Update fail:", e);
           }
         }
       },
       (err) => console.warn(`GPS: ${err.message}`),
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -176,15 +175,23 @@ function App() {
   }, []);
 
   return (
-    <div className="flex h-screen w-screen bg-black overflow-hidden relative text-white selection:bg-orange-500/30 font-sans">
+    <div className="flex h-screen w-screen bg-black overflow-hidden relative text-white font-sans">
       <div className="flex flex-col w-full h-full md:flex-row">
         <div className={`flex-1 relative transition-all duration-500 ${viewMode === 'map' ? 'block' : 'hidden md:block'}`}>
            <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
+           
+           <div className="absolute top-4 left-4 z-[1000] pointer-events-none">
+              <div className="bg-black/80 backdrop-blur px-3 py-1 border border-white/10 rounded uppercase tracking-tighter">
+                <span className="text-[10px] text-gray-500 block">Sector de Operación</span>
+                <span className="text-xs font-bold text-orange-500">TUCUMÁN, AR</span>
+              </div>
+           </div>
+
            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.02),rgba(0,255,0,0.01),rgba(0,0,255,0.02))] z-10 bg-[length:100%_4px,3px_100%]" />
            
            {!supabase && (
              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-red-600/90 text-white text-[10px] px-4 py-1 rounded-full font-bold animate-pulse shadow-lg">
-               SYSTEM ALERT: DATABASE OFFLINE (SYNC DISABLED)
+               SISTEMA: BASE DE DATOS DESCONECTADA
              </div>
            )}
         </div>
@@ -208,18 +215,18 @@ function App() {
         {viewMode === 'list' && (
            <div className="flex-1 md:hidden bg-gray-900 animate-in slide-in-from-right duration-300 overflow-hidden">
                <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
-                  <h2 className="font-mono text-xs font-bold tracking-widest text-gray-400">TEAM_MANIFEST.LOG</h2>
-                  <button onClick={() => setViewMode('map')} className="text-orange-500 font-mono text-[10px] border border-orange-500/30 px-2 py-1 rounded">CLOSE_VIEW</button>
+                  <h2 className="font-mono text-xs font-bold tracking-widest text-gray-400">UNIDADES_ACTIVAS.LOG</h2>
+                  <button onClick={() => setViewMode('map')} className="text-orange-500 font-mono text-[10px] border border-orange-500/30 px-2 py-1 rounded">VOLVER_MAPA</button>
                </div>
                <TeamList members={teamMembers} />
            </div>
         )}
       </div>
 
-      <div className="hidden md:block absolute top-6 left-6 w-72 bg-gray-950/80 backdrop-blur-md rounded-xl border border-white/5 shadow-2xl h-[450px] overflow-hidden z-[500]">
+      <div className="hidden md:block absolute top-20 left-6 w-72 bg-gray-950/80 backdrop-blur-md rounded-xl border border-white/5 shadow-2xl h-[400px] overflow-hidden z-[500]">
          <div className="p-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[10px] font-black tracking-widest text-gray-500">SQUAD_ROSTER</span>
-            <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} title={supabase ? "Database Connected" : "Database Disconnected"} />
+            <span className="text-[10px] font-black tracking-widest text-gray-500 uppercase">Lista de Unidades</span>
+            <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
          </div>
          <TeamList members={teamMembers} />
       </div>
