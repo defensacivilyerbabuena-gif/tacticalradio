@@ -1,20 +1,11 @@
 
-import { createClient } from 'https://jspm.dev/@supabase/supabase-js';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-// Credenciales proporcionadas por el usuario
 const supabaseUrl = 'https://vnfqhfcwfvqdqnfdoixv.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZuZnFoZmN3ZnZxZHFuZmRvaXh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4OTQxMTcsImV4cCI6MjA4MDQ3MDExN30.JuxMpTkqnPAYsFxwbIJeHwLNwvCJbyWhW70O4hNes80';
 
-// Exportamos el cliente inicializado con las credenciales
-export const supabase = (supabaseUrl && supabaseKey) 
-  ? createClient(supabaseUrl, supabaseKey) 
-  : null;
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
-if (!supabase) {
-  console.error("CRITICAL: Supabase credentials missing or invalid.");
-}
-
-// Helper para generar o recuperar un ID único para este dispositivo
 export const getDeviceId = () => {
   let id = localStorage.getItem('tactical_radio_device_id');
   if (!id) {
@@ -23,3 +14,10 @@ export const getDeviceId = () => {
   }
   return id;
 };
+
+// Verificar conexión inicial
+supabase.from('locations').select('count', { count: 'exact', head: true })
+  .then(({ error }) => {
+    if (error) console.error("SUPABASE_OFFLINE:", error.message);
+    else console.log("SUPABASE_ONLINE: Ready for tactical sync.");
+  });
