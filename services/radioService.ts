@@ -6,6 +6,7 @@ import { decode, decodeAudioData, createPcmBlob } from '../utils/audioUtils';
 interface RadioOptions {
   userId: string;
   userName: string;
+  channelId: string;
   onAudioBuffer: (buffer: AudioBuffer, senderId: string) => void;
   onIncomingStreamStart: (senderName: string) => void;
   onIncomingStreamEnd: () => void;
@@ -23,14 +24,12 @@ export class RadioService {
   private isTransmitting: boolean = false;
   private sampleRate: number = 24000;
   
-  // Umbral de ruido más agresivo para PC
   private noiseThreshold: number = 0.045; 
-  private holdTime: number = 300; 
-  private lastActiveTime: number = 0;
 
   constructor(options: RadioOptions) {
     this.options = options;
-    this.channel = supabase.channel('tactical-freq-1', {
+    // Conexión a la frecuencia específica del canal
+    this.channel = supabase.channel(`tactical-freq-${options.channelId}`, {
       config: { broadcast: { ack: false, self: false } }
     });
     
@@ -47,11 +46,12 @@ export class RadioService {
 
   private async initAudioContexts() {
     if (!this.inputAudioContext) {
-      this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: this.sampleRate });
+      this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
     }
     if (!this.outputAudioContext) {
       this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: this.sampleRate });
     }
+    // Crucial para móviles: reanudar contexto
     if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
     if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
   }
@@ -81,14 +81,7 @@ export class RadioService {
           if (abs > maxVal) maxVal = abs;
         }
 
-        const now = Date.now();
-        if (maxVal >= this.noiseThreshold) {
-          this.lastActiveTime = now;
-        }
-
-        if (maxVal < this.noiseThreshold && (now - this.lastActiveTime) > this.holdTime) {
-          return;
-        }
+        if (maxVal < this.noiseThreshold) return;
 
         const pcm = createPcmBlob(inputData);
         this.channel.send({
@@ -144,7 +137,7 @@ export class RadioService {
 
   public startTransmission() {
     this.isTransmitting = true;
-    this.lastActiveTime = Date.now();
+    if (this.inputAudioContext?.state === 'suspended') this.inputAudioContext.resume();
   }
 
   public stopTransmission() {
@@ -158,5 +151,6 @@ export class RadioService {
     if (this.stream) this.stream.getTracks().forEach(t => t.stop());
     if (this.inputAudioContext) await this.inputAudioContext.close();
     if (this.outputAudioContext) await this.outputAudioContext.close();
+    await supabase.removeChannel(this.channel);
   }
 }
