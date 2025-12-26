@@ -21,7 +21,8 @@ export class RadioService {
   private nextStartTime: number = 0;
   private options: RadioOptions;
   private isTransmitting: boolean = false;
-  private sampleRate: number = 24000; // Calidad mejorada
+  private sampleRate: number = 24000;
+  private noiseThreshold: number = 0.015; // Puerta de ruido (Squelch)
 
   constructor(options: RadioOptions) {
     this.options = options;
@@ -58,7 +59,8 @@ export class RadioService {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          channelCount: 1
         } 
       });
       
@@ -66,10 +68,20 @@ export class RadioService {
       this.processor = this.inputAudioContext!.createScriptProcessor(2048, 1, 1);
 
       this.processor.onaudioprocess = (e) => {
-        // COMPUERTA LOGICA: Si no estamos transmitiendo, no enviamos nada
         if (!this.isTransmitting) return;
 
         const inputData = e.inputBuffer.getChannelData(0);
+        
+        // NOISE GATE: Analizar si hay suficiente volumen para transmitir
+        let maxVal = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          const abs = Math.abs(inputData[i]);
+          if (abs > maxVal) maxVal = abs;
+        }
+
+        // Si es silencio o ruido de fondo muy bajo, no enviamos paquetes
+        if (maxVal < this.noiseThreshold) return;
+
         const pcm = createPcmBlob(inputData);
         
         this.channel.send({
@@ -104,7 +116,6 @@ export class RadioService {
       source.buffer = buffer;
       source.connect(this.outputAudioContext.destination);
       
-      // Sincronización de paquetes con pequeño jitter buffer
       const currentTime = this.outputAudioContext.currentTime;
       if (this.nextStartTime < currentTime) {
         this.nextStartTime = currentTime + 0.05; 
@@ -127,9 +138,6 @@ export class RadioService {
 
   public startTransmission() {
     this.isTransmitting = true;
-    if (this.inputAudioContext && this.inputAudioContext.state === 'suspended') {
-      this.inputAudioContext.resume();
-    }
   }
 
   public stopTransmission() {
