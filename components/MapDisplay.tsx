@@ -5,11 +5,7 @@ import L from 'leaflet';
 import { TeamMember } from '../types';
 import { Radio } from 'lucide-react';
 
-const TUCUMAN_CENTER = { lat: -26.8241, lng: -65.2226 };
-const TUCUMAN_BOUNDS: L.LatLngBoundsExpression = [
-  [-28.5, -67.0], 
-  [-25.5, -64.0]
-];
+const DEFAULT_CENTER = { lat: 0, lng: 0 };
 
 // Arreglo para iconos de Leaflet
 const iconUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
@@ -22,20 +18,21 @@ interface MapDisplayProps {
   teamMembers: TeamMember[];
 }
 
-// Componente para manejar el redimensionado y centrado
 const MapController = ({ center }: { center: { lat: number; lng: number } | null }) => {
   const map = useMap();
   
   useEffect(() => {
-    // Forzar a Leaflet a detectar el tamaño real del contenedor (Arregla el mapa gris)
-    setTimeout(() => {
+    // Forzar a Leaflet a detectar el tamaño real del contenedor inmediatamente
+    const timer = setTimeout(() => {
       map.invalidateSize();
-    }, 250);
+    }, 100);
+    return () => clearTimeout(timer);
   }, [map]);
 
   useEffect(() => {
     if (center) {
-      map.setView(center, map.getZoom());
+      // Solo centramos automáticamente si es la primera vez o el cambio es significativo
+      map.flyTo(center, map.getZoom(), { animate: true, duration: 1.5 });
     }
   }, [center, map]);
 
@@ -58,10 +55,9 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
   return (
     <div className="w-full h-full bg-[#0a0a0a]">
       <MapContainer 
-        center={userLocation || TUCUMAN_CENTER} 
-        zoom={13} 
-        minZoom={7}
-        maxBounds={TUCUMAN_BOUNDS}
+        center={userLocation || DEFAULT_CENTER} 
+        zoom={userLocation ? 15 : 2} 
+        minZoom={2}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
       >
@@ -83,7 +79,7 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
             </Marker>
             <Circle 
               center={userLocation}
-              radius={150} 
+              radius={100} 
               pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.1, weight: 1 }} 
             />
           </>
@@ -101,6 +97,7 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
                   <Radio size={10} /> {member.role}
                </div>
                <div className="text-[10px] font-mono text-gray-500 mt-1">RNG: {member.distance}</div>
+               <div className="text-[8px] uppercase text-orange-500 mt-1">CANAL: {member.channel_id || 'Global'}</div>
             </Popup>
           </Marker>
         ))}
@@ -111,6 +108,10 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
         }
         .leaflet-container {
           background: #0a0a0a !important;
+        }
+        .custom-div-icon {
+          background: transparent !important;
+          border: none !important;
         }
       `}</style>
     </div>
