@@ -23,20 +23,20 @@ export class GeminiLiveService {
 
   public async connect(options: LiveServiceOptions) {
     try {
-      options.onLog("VERIFICANDO_LLAVE...");
+      options.onLog("AUTH_CHECK...");
 
-      // Verificar si hay una API Key seleccionada en el entorno
+      // Verificar llave
       const hasKey = await (window as any).aistudio.hasSelectedApiKey();
       if (!hasKey) {
-        options.onLog("POR FAVOR, SELECCIONA TU LLAVE GRATUITA");
+        options.onLog("SELECCIONA_LLAVE_AI");
         await (window as any).aistudio.openSelectKey();
-        // Nota: Después de openSelectKey, process.env.API_KEY se inyecta automáticamente.
+        // Según guías, asumimos éxito tras llamar al diálogo
       }
 
       options.onConnectionUpdate(ConnectionState.CONNECTING);
-      options.onLog("CONECTANDO_CON_GOOGLE...");
+      options.onLog("CONEXION_V2.5...");
 
-      // Crear instancia con la clave inyectada (puede ser de capa gratuita)
+      // Instancia fresca con la llave inyectada
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -44,7 +44,7 @@ export class GeminiLiveService {
       this.outputNode = this.outputAudioContext.createGain();
       this.outputNode.connect(this.outputAudioContext.destination);
 
-      options.onLog("ABRIENDO_MICROFONO...");
+      options.onLog("MIC_REQUEST...");
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       this.sessionPromise = ai.live.connect({
@@ -54,13 +54,13 @@ export class GeminiLiveService {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          systemInstruction: 'Eres Overlord, un despachador de radio real en Tucumán. Responde de forma muy breve y profesional. Usa español de Argentina. Tu objetivo es coordinar unidades en el mapa.',
+          systemInstruction: 'Eres Overlord, despachador de radio táctico en Tucumán. Sé extremadamente breve. Usa lenguaje militar argentino ("Unidad reciba", "QSL", "Adelante"). Coordenadas recibidas.',
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
         callbacks: {
           onopen: () => {
-            options.onLog("CONEXION_EXITOSA");
+            options.onLog("ENLACE_ESTABLECIDO");
             options.onConnectionUpdate(ConnectionState.CONNECTED);
             this.startAudioStreaming();
           },
@@ -84,19 +84,19 @@ export class GeminiLiveService {
             }
           },
           onclose: () => {
-            options.onLog("RADIO_DESCONECTADA");
+            options.onLog("DISCONNECT_QRT");
             options.onConnectionUpdate(ConnectionState.DISCONNECTED);
           },
-          onerror: (err) => {
+          onerror: (err: any) => {
             console.error(err);
-            options.onLog("FALLO_EN_EL_ENLACE");
+            options.onLog("ERROR_RED_RADIO");
             options.onConnectionUpdate(ConnectionState.ERROR);
           }
         }
       });
     } catch (error: any) {
       console.error(error);
-      options.onLog(`ERROR: ${error.message}`);
+      options.onLog(`AUTH_FAIL: ${error.message}`);
       options.onConnectionUpdate(ConnectionState.ERROR);
     }
   }
