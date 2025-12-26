@@ -7,7 +7,7 @@ import { EmergencyModal } from './components/EmergencyModal';
 import { TeamMember, ConnectionState } from './types';
 import { RadioService } from './services/radioService';
 import { supabase, getDeviceId } from './services/supabase';
-import { User, ShieldCheck } from 'lucide-react';
+import { User, ShieldCheck, List, X } from 'lucide-react';
 
 const DEVICE_ID = getDeviceId();
 
@@ -33,6 +33,7 @@ function App() {
   const [audioLevel, setAudioLevel] = useState(0);
   const [systemLog, setSystemLog] = useState<string>("BUSCANDO_GPS...");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [showTeamList, setShowTeamList] = useState(false); // Toggle para móvil
 
   const radioRef = useRef<RadioService | null>(null);
 
@@ -56,16 +57,35 @@ function App() {
 
   useEffect(() => {
     if (!isProfileSet) return;
+
+    // CARGA INICIAL (Solución para ver unidades conectadas antes que yo)
+    const fetchInitialData = async () => {
+      const { data, error } = await supabase
+        .from('locations')
+        .select('*')
+        .gt('last_seen', new Date(Date.now() - 3600000).toISOString()); // Filtra los últimos 60 min
+      
+      if (data) {
+        setTeamMembersRaw(data.filter(m => m.id !== DEVICE_ID));
+      }
+      if (error) setSystemLog("DB_FETCH_ERROR");
+    };
+
+    fetchInitialData();
+
     const channel = supabase.channel('tactical-realtime')
       .on('postgres_changes', { event: '*', table: 'locations', schema: 'public' }, (payload: any) => {
         if (payload.new && payload.new.id !== DEVICE_ID) {
           setTeamMembersRaw(prev => {
             const index = prev.findIndex(m => m.id === payload.new.id);
             if (index === -1) return [...prev, payload.new];
-            const next = [...prev]; next[index] = payload.new; return next;
+            const next = [...prev]; 
+            next[index] = payload.new; 
+            return next;
           });
         }
       }).subscribe();
+    
     return () => { supabase.removeChannel(channel); };
   }, [isProfileSet]);
 
@@ -90,7 +110,7 @@ function App() {
         last_seen: new Date().toISOString()
       });
     }, (err) => {
-      setSystemLog(`ERROR_GPS: ${err.message}`);
+      setSystemLog(`ERROR_GPS: ${err.code === 1 ? 'PERMISO_DENEGADO' : 'FALLO_SENAL'}`);
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -194,14 +214,33 @@ function App() {
             </div>
          </div>
 
-         {/* LISTA DE EQUIPO (ESCRITORIO) */}
+         {/* BOTÓN TOGGLE LISTA (Solo Móvil) */}
+         <button 
+           onClick={() => setShowTeamList(!showTeamList)}
+           className="md:hidden absolute top-4 right-4 z-[1000] w-10 h-10 bg-black/80 border border-white/20 rounded flex items-center justify-center text-white"
+         >
+           {showTeamList ? <X size={20} /> : <List size={20} />}
+         </button>
+
+         {/* LISTA DE EQUIPO (DESKTOP) */}
          <div className="hidden md:block absolute bottom-6 left-6 w-64 bg-black/90 backdrop-blur rounded border border-white/10 shadow-2xl h-64 overflow-hidden z-[500]">
-            <div className="p-2 bg-white/5 border-b border-white/10 text-[10px] font-bold text-gray-400 text-center tracking-widest">PERSONAL EN LÍNEA</div>
+            <div className="p-2 bg-white/5 border-b border-white/10 text-[10px] font-bold text-gray-400 text-center tracking-widest uppercase">Unidades en Zona</div>
             <TeamList members={teamMembers} />
          </div>
+
+         {/* LISTA DE EQUIPO (MÓVIL OVERLAY) */}
+         {showTeamList && (
+           <div className="md:hidden absolute inset-0 z-[1001] bg-black">
+              <div className="flex justify-between items-center p-4 border-b border-white/10">
+                <h2 className="font-bold text-orange-500 tracking-tighter">PERSONAL EN LÍNEA</h2>
+                <button onClick={() => setShowTeamList(false)}><X size={24} /></button>
+              </div>
+              <TeamList members={teamMembers} />
+           </div>
+         )}
       </div>
 
-      {/* SECCIÓN RADIO (DERECHA EN PC, ABAJO EN MÓVIL) */}
+      {/* SECCIÓN RADIO */}
       <div className="flex-none md:w-[400px] h-auto md:h-full bg-gray-950 z-20">
         <RadioControl 
            connectionState={connectionState}
