@@ -5,7 +5,7 @@ import { RadioControl } from './components/RadioControl';
 import { TeamList } from './components/TeamList';
 import { EmergencyModal } from './components/EmergencyModal';
 import { TeamMember, ConnectionState } from './types';
-import { GeminiLiveService } from './services/geminiLive';
+import { RadioService } from './services/radioService';
 import { supabase, getDeviceId } from './services/supabase';
 
 const DEVICE_ID = getDeviceId();
@@ -26,12 +26,12 @@ function App() {
   const [teamMembersRaw, setTeamMembersRaw] = useState<TeamMember[]>([]);
   const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [isTalking, setIsTalking] = useState(false);
-  const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  const [remoteTalker, setRemoteTalker] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [systemLog, setSystemLog] = useState<string>("ESPERANDO_GPS...");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
-  const liveServiceRef = useRef<GeminiLiveService | null>(null);
+  const radioRef = useRef<RadioService | null>(null);
 
   const teamMembers = useMemo(() => {
     if (!userLocation) return teamMembersRaw;
@@ -42,7 +42,6 @@ function App() {
   }, [teamMembersRaw, userLocation]);
 
   useEffect(() => {
-    // Escuchar cambios de otros operadores en tiempo real
     const channel = supabase.channel('tactical-realtime')
       .on('postgres_changes', { event: '*', table: 'locations', schema: 'public' }, (payload: any) => {
         if (payload.new && payload.new.id !== DEVICE_ID) {
@@ -67,7 +66,6 @@ function App() {
       setUserLocation({ lat: latitude, lng: longitude });
       setSystemLog("GPS_ACTIVO");
       
-      // Actualizar mi posición en la base de datos real
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
         name: USER_NAME, 
@@ -84,23 +82,46 @@ function App() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  const handleConnect = useCallback(async () => {
-    if (!liveServiceRef.current) liveServiceRef.current = new GeminiLiveService();
-    await liveServiceRef.current.connect({
-      onConnectionUpdate: setConnectionState,
-      onAudioData: () => { setAudioLevel(80); setTimeout(() => setAudioLevel(0), 100); },
-      onTranscript: (text) => setLastTranscript(text),
-      onLog: (msg) => setSystemLog(msg)
-    });
-  }, []);
-
-  const handleDisconnect = useCallback(async () => {
-    if (liveServiceRef.current) {
-      await liveServiceRef.current.disconnect();
-      setConnectionState(ConnectionState.DISCONNECTED);
-      setSystemLog("RADIO_OFF");
+  const handleConnect = useCallback(() => {
+    setConnectionState(ConnectionState.CONNECTING);
+    try {
+      radioRef.current = new RadioService({
+        userId: DEVICE_ID,
+        userName: USER_NAME,
+        onAudioBuffer: () => {
+          setAudioLevel(prev => Math.min(100, prev + 20));
+          setTimeout(() => setAudioLevel(0), 150);
+        },
+        onIncomingStreamStart: (name) => setRemoteTalker(name),
+        onIncomingStreamEnd: () => setRemoteTalker(null)
+      });
+      setConnectionState(ConnectionState.CONNECTED);
+      setSystemLog("MESH_NET_ACTIVE");
+    } catch (e) {
+      setConnectionState(ConnectionState.ERROR);
+      setSystemLog("ERROR_CONEXION");
     }
   }, []);
+
+  const handleDisconnect = useCallback(() => {
+    radioRef.current = null;
+    setConnectionState(ConnectionState.DISCONNECTED);
+    setSystemLog("RADIO_OFF");
+  }, []);
+
+  const handleTalkStart = async () => {
+    if (radioRef.current && connectionState === ConnectionState.CONNECTED) {
+      setIsTalking(true);
+      await radioRef.current.startTransmission();
+    }
+  };
+
+  const handleTalkEnd = () => {
+    if (radioRef.current) {
+      radioRef.current.stopTransmission();
+      setIsTalking(false);
+    }
+  };
 
   return (
     <div className="flex h-screen w-screen bg-black overflow-hidden relative text-white font-sans">
@@ -109,11 +130,11 @@ function App() {
            <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
            <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-orange-500/30 rounded shadow-lg">
-                <span className="text-[10px] text-orange-500/50 block font-mono tracking-widest">ZONA_TUCUMAN</span>
-                <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">OP_CENTER_ACTIVE</span>
+                <span className="text-[10px] text-orange-500/50 block font-mono tracking-widest">MESH_TUCUMAN</span>
+                <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">{USER_NAME}</span>
               </div>
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
-                <span className="text-[10px] text-emerald-500/50 block font-mono">SYSTEM_LOG</span>
+                <span className="text-[10px] text-emerald-500/50 block font-mono">STATUS</span>
                 <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase animate-pulse">{systemLog}</span>
               </div>
            </div>
@@ -123,9 +144,9 @@ function App() {
           <RadioControl 
              connectionState={connectionState}
              isTalking={isTalking}
-             onTalkStart={() => { if (liveServiceRef.current && connectionState === ConnectionState.CONNECTED) { liveServiceRef.current.resumeStreaming(); setIsTalking(true); } }}
-             onTalkEnd={() => { if (liveServiceRef.current) { liveServiceRef.current.stopStreaming(); setIsTalking(false); } }}
-             lastTranscript={lastTranscript}
+             onTalkStart={handleTalkStart}
+             onTalkEnd={handleTalkEnd}
+             lastTranscript={remoteTalker ? `${remoteTalker} TRANSMITIENDO...` : null}
              toggleView={() => setViewMode(prev => prev === 'map' ? 'list' : 'map')}
              viewMode={viewMode}
              onConnect={handleConnect}
