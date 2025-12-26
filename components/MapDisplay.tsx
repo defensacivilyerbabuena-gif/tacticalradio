@@ -11,7 +11,6 @@ const TUCUMAN_BOUNDS: L.LatLngBoundsExpression = [
   [-25.5, -64.0]
 ];
 
-// Arreglo para iconos de Leaflet
 const iconUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
 const shadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -22,15 +21,14 @@ interface MapDisplayProps {
   teamMembers: TeamMember[];
 }
 
-// Componente para manejar el redimensionado y centrado
 const MapController = ({ center }: { center: { lat: number; lng: number } | null }) => {
   const map = useMap();
   
   useEffect(() => {
-    // Forzar a Leaflet a detectar el tamaño real del contenedor (Arregla el mapa gris)
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       map.invalidateSize();
-    }, 250);
+    }, 500); // Aumentado para móviles lentos
+    return () => clearTimeout(timer);
   }, [map]);
 
   useEffect(() => {
@@ -78,7 +76,6 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
             <Marker position={userLocation} icon={userIcon}>
               <Popup>
                 <div className="font-bold text-gray-900">MI_UNIDAD</div>
-                <div className="text-[10px] text-gray-500 font-mono">ESTADO: ONLINE</div>
               </Popup>
             </Marker>
             <Circle 
@@ -96,11 +93,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
             icon={teamIcon}
           >
             <Popup>
-               <div className="font-bold text-gray-900">{member.name}</div>
-               <div className="text-xs text-gray-600 flex items-center gap-1">
-                  <Radio size={10} /> {member.role}
-               </div>
-               <div className="text-[10px] font-mono text-gray-500 mt-1">RNG: {member.distance}</div>
+               <div className="font-bold text-gray-900 uppercase text-xs">{member.name}</div>
+               <div className="text-[10px] text-gray-500 font-mono mt-1">DIST: {member.distance}</div>
             </Popup>
           </Marker>
         ))}
@@ -109,9 +103,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({ userLocation, teamMember
         .map-tiles-grayscale {
           filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
-        .leaflet-container {
-          background: #0a0a0a !important;
-        }
+        .leaflet-container { background: #0a0a0a !important; }
+        .custom-div-icon { background: transparent !important; border: none !important; }
       `}</style>
     </div>
   );
