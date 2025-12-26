@@ -1,3 +1,4 @@
+
 import { Modality } from "@google/genai";
 
 // Decode base64 string to byte array
@@ -21,18 +22,18 @@ export function encode(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// Create a Blob for sending to Gemini
+// Create a Blob for sending
 export function createPcmBlob(data: Float32Array): { data: string; mimeType: string } {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
-    // Clamping to prevent overflow
-    int16[i] = Math.max(-32768, Math.min(32767, Math.floor(data[i] * 32768)));
+    // Normalización con limitador para evitar distorsión
+    const s = Math.max(-1, Math.min(1, data[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
   return {
     data: encode(new Uint8Array(int16.buffer)),
-    mimeType: 'audio/pcm;rate=16000',
+    mimeType: 'audio/pcm;rate=24000',
   };
 }
 
@@ -43,7 +44,6 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // Ensure we don't try to read past the end if data length is odd
   const lengthInShorts = Math.floor(data.byteLength / 2);
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, lengthInShorts);
   const frameCount = dataInt16.length / numChannels;
