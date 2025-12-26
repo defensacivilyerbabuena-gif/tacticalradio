@@ -28,7 +28,7 @@ function App() {
   const [isTalking, setIsTalking] = useState(false);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [systemLog, setSystemLog] = useState<string>("SYSTEM_READY_STANDBY");
+  const [systemLog, setSystemLog] = useState<string>("RADIO_ESPERA");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
@@ -57,14 +57,15 @@ function App() {
 
   useEffect(() => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.watchPosition(async (pos) => {
+    const watchId = navigator.geolocation.watchPosition(async (pos) => {
       const { latitude, longitude } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
       await supabase.from('locations').upsert({
         id: DEVICE_ID, name: USER_NAME, lat: latitude, lng: longitude, 
-        role: 'Field Operator', status: 'online', last_seen: new Date().toISOString()
+        role: 'Field Op', status: 'online', last_seen: new Date().toISOString()
       });
-    }, null, { enableHighAccuracy: true });
+    }, (err) => setSystemLog(`GPS_ERROR: ${err.code}`), { enableHighAccuracy: true });
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
   const handleConnect = useCallback(async () => {
@@ -81,7 +82,7 @@ function App() {
     if (liveServiceRef.current) {
       await liveServiceRef.current.disconnect();
       setConnectionState(ConnectionState.DISCONNECTED);
-      setSystemLog("LINK_TERMINATED");
+      setSystemLog("RADIO_OFF");
     }
   }, []);
 
@@ -92,11 +93,11 @@ function App() {
            <MapDisplay userLocation={userLocation} teamMembers={teamMembers} />
            <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-orange-500/30 rounded">
-                <span className="text-[10px] text-orange-500/50 block font-mono">OPERATIONAL_AREA</span>
-                <span className="text-xs font-bold text-orange-500 font-mono">TUCUMÁN, AR [ZONE_A]</span>
+                <span className="text-[10px] text-orange-500/50 block font-mono tracking-widest">ZONA_OPERATIVA</span>
+                <span className="text-xs font-bold text-orange-500 font-mono">TUCUMÁN, AR</span>
               </div>
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded">
-                <span className="text-[10px] text-emerald-500/50 block font-mono">SYSTEM_LOG</span>
+                <span className="text-[10px] text-emerald-500/50 block font-mono">ESTADO_RED</span>
                 <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase animate-pulse">{systemLog}</span>
               </div>
            </div>
@@ -119,10 +120,10 @@ function App() {
         </div>
       </div>
 
-      <div className="hidden md:block absolute top-32 left-6 w-72 bg-gray-950/90 backdrop-blur rounded border border-white/5 shadow-2xl h-[350px] overflow-hidden z-[500]">
+      <div className="hidden md:block absolute bottom-10 left-6 w-72 bg-gray-950/90 backdrop-blur rounded border border-white/5 shadow-2xl h-[300px] overflow-hidden z-[500]">
          <div className="p-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[10px] font-black tracking-widest text-gray-400">NET_UNITS</span>
-            <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[10px] font-black tracking-widest text-gray-400">UNIDADES_RED</span>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
          </div>
          <TeamList members={teamMembers} />
       </div>
