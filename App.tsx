@@ -33,6 +33,21 @@ function App() {
 
   const radioRef = useRef<RadioService | null>(null);
 
+  // Detener transmisión si se suelta el clic fuera del botón
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isTalking) {
+        handleTalkEnd();
+      }
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('touchend', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('touchend', handleGlobalMouseUp);
+    };
+  }, [isTalking]);
+
   const teamMembers = useMemo(() => {
     if (!userLocation) return teamMembersRaw;
     return teamMembersRaw.map(m => ({
@@ -61,10 +76,11 @@ function App() {
       return;
     }
     
+    // Configuración de ALTA PRECISIÓN
     const watchId = navigator.geolocation.watchPosition(async (pos) => {
-      const { latitude, longitude } = pos.coords;
+      const { latitude, longitude, accuracy } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
-      setSystemLog("GPS_ACTIVO");
+      setSystemLog(`GPS_OK (${accuracy.toFixed(0)}m)`);
       
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
@@ -72,15 +88,19 @@ function App() {
         lat: latitude, 
         lng: longitude, 
         role: 'Field Op', 
-        status: 'online', 
+        status: isTalking ? 'talking' : 'online', 
         last_seen: new Date().toISOString()
       });
     }, (err) => {
       setSystemLog(`GPS_ERROR: ${err.message}`);
-    }, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
+    }, { 
+      enableHighAccuracy: true, 
+      timeout: 10000, 
+      maximumAge: 0 // Forzar lectura fresca del sensor
+    });
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [isTalking]);
 
   const handleConnect = useCallback(() => {
     setConnectionState(ConnectionState.CONNECTING);
@@ -89,8 +109,8 @@ function App() {
         userId: DEVICE_ID,
         userName: USER_NAME,
         onAudioBuffer: () => {
-          setAudioLevel(prev => Math.min(100, prev + 20));
-          setTimeout(() => setAudioLevel(0), 150);
+          setAudioLevel(prev => Math.min(100, prev + 25));
+          setTimeout(() => setAudioLevel(0), 100);
         },
         onIncomingStreamStart: (name) => setRemoteTalker(name),
         onIncomingStreamEnd: () => setRemoteTalker(null)
@@ -104,6 +124,7 @@ function App() {
   }, []);
 
   const handleDisconnect = useCallback(() => {
+    if (radioRef.current) radioRef.current.disconnect();
     radioRef.current = null;
     setConnectionState(ConnectionState.DISCONNECTED);
     setSystemLog("RADIO_OFF");
@@ -112,7 +133,7 @@ function App() {
   const handleTalkStart = async () => {
     if (radioRef.current && connectionState === ConnectionState.CONNECTED) {
       setIsTalking(true);
-      await radioRef.current.startTransmission();
+      radioRef.current.startTransmission();
     }
   };
 
@@ -134,7 +155,7 @@ function App() {
                 <span className="text-xs font-bold text-orange-500 font-mono tracking-tight">{USER_NAME}</span>
               </div>
               <div className="bg-black/90 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
-                <span className="text-[10px] text-emerald-500/50 block font-mono">STATUS</span>
+                <span className="text-[10px] text-emerald-500/50 block font-mono">RADIO_NET</span>
                 <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase animate-pulse">{systemLog}</span>
               </div>
            </div>
