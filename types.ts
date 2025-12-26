@@ -1,3 +1,4 @@
+
 export interface TeamMember {
   id: string;
   name: string;
@@ -6,6 +7,7 @@ export interface TeamMember {
   lat: number;
   lng: number;
   distance?: string;
+  channel_id: string;
 }
 
 export enum ConnectionState {
