@@ -23,9 +23,9 @@ export class RadioService {
   private isTransmitting: boolean = false;
   private sampleRate: number = 24000;
   
-  // Umbrales de ruido mejorados
-  private noiseThreshold: number = 0.025; // Subido para filtrar ventiladores
-  private holdTime: number = 250; // Milisegundos para mantener abierto tras silencio (Histéresis)
+  // Umbral de ruido más agresivo para PC
+  private noiseThreshold: number = 0.045; 
+  private holdTime: number = 300; 
   private lastActiveTime: number = 0;
 
   constructor(options: RadioOptions) {
@@ -86,7 +86,6 @@ export class RadioService {
           this.lastActiveTime = now;
         }
 
-        // Si el volumen es bajo Y ha pasado el tiempo de gracia, no transmitimos
         if (maxVal < this.noiseThreshold && (now - this.lastActiveTime) > this.holdTime) {
           return;
         }
@@ -106,7 +105,7 @@ export class RadioService {
       this.source.connect(this.processor);
       this.processor.connect(this.inputAudioContext!.destination);
     } catch (err) {
-      console.error("Error inicializando micro:", err);
+      console.error("MIC_INIT_ERROR:", err);
     }
   }
 
@@ -139,7 +138,7 @@ export class RadioService {
         }
       };
     } catch (e) {
-      console.error("Error decodificando audio entrante:", e);
+      console.error("RX_ERROR:", e);
     }
   }
 
