@@ -32,7 +32,7 @@ function App() {
   const [isTalking, setIsTalking] = useState(false);
   const [remoteTalker, setRemoteTalker] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [systemLog, setSystemLog] = useState<string>("SINTONIZANDO...");
+  const [systemLog, setSystemLog] = useState<string>("INICIALIZANDO...");
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   const radioRef = useRef<RadioService | null>(null);
@@ -47,28 +47,40 @@ function App() {
     };
   }, [isTalking]);
 
-  // Filtrar miembros por el canal actual (o mostrar globales si no tienen canal)
+  // MOSTRAR TODOS LOS MIEMBROS (El canal es solo para voz)
   const teamMembers = useMemo(() => {
-    const filtered = teamMembersRaw.filter(m => !m.channel_id || m.channel_id === currentChannel);
-    if (!userLocation) return filtered;
-    return filtered.map(m => ({
+    if (!userLocation) return teamMembersRaw;
+    return teamMembersRaw.map(m => ({
       ...m,
       distance: calculateDistance(userLocation.lat, userLocation.lng, m.lat, m.lng)
     }));
-  }, [teamMembersRaw, userLocation, currentChannel]);
+  }, [teamMembersRaw, userLocation]);
 
+  // Cargar miembros iniciales y suscribirse a cambios globales
   useEffect(() => {
     if (!isProfileSet) return;
+
+    const fetchInitial = async () => {
+      const { data } = await supabase.from('locations').select('*');
+      if (data) {
+        setTeamMembersRaw(data.filter(m => m.id !== DEVICE_ID));
+      }
+    };
+    fetchInitial();
+
     const channel = supabase.channel('tactical-realtime-global')
       .on('postgres_changes', { event: '*', table: 'locations', schema: 'public' }, (payload: any) => {
         if (payload.new && payload.new.id !== DEVICE_ID) {
           setTeamMembersRaw(prev => {
             const index = prev.findIndex(m => m.id === payload.new.id);
             if (index === -1) return [...prev, payload.new];
-            const next = [...prev]; next[index] = payload.new; return next;
+            const next = [...prev]; 
+            next[index] = payload.new; 
+            return next;
           });
         }
       }).subscribe();
+      
     return () => { supabase.removeChannel(channel); };
   }, [isProfileSet]);
 
@@ -78,29 +90,29 @@ function App() {
       return;
     }
     
-    setSystemLog("BUSCANDO_SATÉLITES...");
+    setSystemLog("BUSCANDO_GPS...");
     
     const watchId = navigator.geolocation.watchPosition(async (pos) => {
-      const { latitude, longitude, accuracy } = pos.coords;
+      const { latitude, longitude } = pos.coords;
       setUserLocation({ lat: latitude, lng: longitude });
-      setSystemLog(`GPS_OK_CH${currentChannel}`);
+      setSystemLog(`GPS_OK_ACTIVO`);
       
+      // Actualizar mi posición siempre, indicando mi canal de voz actual
       await supabase.from('locations').upsert({
         id: DEVICE_ID, 
         name: userName, 
         lat: latitude, 
         lng: longitude, 
-        role: `Unidad CH${currentChannel}`, 
+        role: `Unidad en Canal ${currentChannel}`, 
         status: isTalking ? 'talking' : 'online', 
         channel_id: currentChannel,
         last_seen: new Date().toISOString()
       }, { onConflict: 'id' });
     }, (error) => {
-      console.error("GPS_ERROR:", error);
-      setSystemLog(`GPS_ERROR: ${error.code}`);
+      setSystemLog(`GPS_ERR: ${error.code}`);
     }, { 
       enableHighAccuracy: true,
-      timeout: 10000,
+      timeout: 15000,
       maximumAge: 0
     });
 
@@ -204,12 +216,12 @@ function App() {
               <span className="text-xs font-bold text-orange-500 font-mono">{userName}</span>
             </div>
             <div className="bg-black/80 backdrop-blur px-3 py-1 border border-emerald-500/30 rounded shadow-lg">
-              <span className="text-[9px] text-emerald-500/50 block font-mono">STATUS_CH{currentChannel}</span>
+              <span className="text-[9px] text-emerald-500/50 block font-mono">VOICE_CH_{currentChannel}</span>
               <span className="text-[10px] font-bold text-emerald-500 font-mono uppercase">{systemLog}</span>
             </div>
          </div>
          <div className="hidden md:block absolute bottom-6 left-6 w-64 bg-black/90 backdrop-blur rounded border border-white/10 shadow-2xl h-64 overflow-hidden z-[500]">
-            <div className="p-2 bg-white/5 border-b border-white/10 text-[9px] font-bold text-gray-500 text-center tracking-widest">EQUIPO EN CANAL {currentChannel}</div>
+            <div className="p-2 bg-white/5 border-b border-white/10 text-[9px] font-bold text-gray-400 text-center tracking-widest uppercase">Unidades en Malla Global</div>
             <TeamList members={teamMembers} />
          </div>
       </div>
